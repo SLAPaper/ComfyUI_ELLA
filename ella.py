@@ -24,9 +24,7 @@ class GetSigma:
     def INPUT_TYPES(s):
         return {"required": {
             "model": ("MODEL",),
-            "sampler_name": (comfy.samplers.KSampler.SAMPLERS, ),
-            "scheduler": (comfy.samplers.KSampler.SCHEDULERS, ),
-            "steps": ("INT", {"default": 10000, "min": 0, "max": 10000}),
+            "sigmas": ("SIGMAS",),
             "start_at_step": ("INT", {"default": 0, "min": 0, "max": 10000}),
             "end_at_step": ("INT", {"default": 10000, "min": 1, "max": 10000}),
             }}
@@ -36,15 +34,12 @@ class GetSigma:
 
     CATEGORY = "latent/noise"
         
-    def calc_sigma(self, model, sampler_name, scheduler, steps, start_at_step, end_at_step):
-        device = comfy.model_management.get_torch_device()
-        end_at_step = min(steps, end_at_step)
+    def calc_sigma(self, model, sigmas, start_at_step, end_at_step):
+        end_at_step = min(len(sigmas) - 1, end_at_step)
         start_at_step = min(start_at_step, end_at_step)
-        sampler = comfy.samplers.KSampler(model, steps=steps, device=device, sampler=sampler_name, scheduler=scheduler, denoise=1.0, model_options=model.model_options)
-        sigmas = sampler.sigmas
         sigma = sigmas[start_at_step] - sigmas[end_at_step]
         sigma /= model.model.latent_format.scale_factor
-        return (sigma.cpu().numpy(),)
+        return (sigma.item(),)
 
 class LoadElla:
     def __init__(self):
@@ -80,8 +75,8 @@ class ELLATextEncode:
         return {
             "required": {
                 "text": ("STRING", {"multiline": True}), 
-                "sigma": ("FLOAT", {"default": 1}, ),
-                "ella": ("ELLA", ),
+                "sigma": ("FLOAT", {"default": 1000.0}, ),
+                "ella_dict": ("ELLA", ),
             }
         }
 
@@ -90,14 +85,12 @@ class ELLATextEncode:
 
     CATEGORY = "ella/conditioning"
 
-    def encode(self, text, ella: dict, sigma):
-        ella_dict = ella
-
+    def encode(self, text, sigma: float, ella_dict: dict):
         ella: ELLA = ella_dict.get("ELLA")
         t5: T5TextEmbedder = ella_dict.get("T5")
 
         cond = t5(text)
-        cond_ella = ella(cond, timesteps=torch.from_numpy(sigma))
+        cond_ella = ella(cond, timesteps=torch.tensor(sigma))
         
         return ([[cond_ella, {"pooled_output": cond_ella}]], ) # Output twice as we don't use pooled output
         
